@@ -1,29 +1,254 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width">
-            <title></title>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Radnor Wildlife Watch</title>
 
-        <!--put your external stylesheet links here-->
-        <link rel="stylesheet" href="css/style.css">
-        <!--[if IE<9]>
-            <link rel="stylesheet" href="css/style.ie.css">
-        <![endif]-->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="app">
 
-         <!--you can also place internal styles here;
-             place these within <style> tags-->
+    <div id="splashScreen" class="splash-overlay">
+      <div class="splash-card">
+        <div class="splash-header">
+          <h1>Radnor Wildlife Watch</h1>
+          <p class="splash-subtitle">Educational park map and wildlife observation demo</p>
+        </div>
+    
+        <div class="splash-section">
+          <h2>Before You Explore</h2>
+          <p>
+            Please respect wildlife and follow all posted park rules while using this application.
+            Wildlife should be observed from a safe and respectful distance, and visitors should
+            remain on approved public trails and accessible areas whenever possible.
+          </p>
+          <p>
+            Some areas of the park are environmentally sensitive or restricted for habitat protection.
+            In particular, the <b>Eagle Protection Zone</b> is a protected area and should not be entered.
+            This zone is shown in the application to help communicate park stewardship and responsible use.
+          </p>
+        </div>
+    
+        <div class="splash-section">
+          <h2>About This App</h2>
+          <p>
+            This application was created for <b>educational purposes</b> as part of a web mapping project.
+            It is intended to demonstrate a mobile-friendly park map, interactive layers, map filtering,
+            and user-centered design concepts.
+          </p>
+          <p>
+            The wildlife sightings shown in this application are <b>mock data</b> created for demonstration.
+            They are included to support map interaction, filtering, and prototype functionality and should
+            not be interpreted as official or current wildlife observations.
+          </p>
+        </div>
+    
+        <div class="splash-section">
+          <h2>Data and Sources</h2>
+          <p>
+            Park features, trails, facilities, water features, and habitat-related content were assembled
+            from public, reference, and educational sources for this project. Species reference information
+            was informed by publicly available Radnor Lake materials and related park information.
+          </p>
+          <p>
+            This application is not an official park management tool and should not be used as an authoritative
+            source for navigation, wildlife reporting, or restricted area enforcement.
+          </p>
+        </div>
+    
+        <button id="enterAppBtn" type="button" class="panel-like-btn">Enter App</button>
+      </div>
+    </div>
+
+
+    <div id="map"></div>
+
+    <div id="appHeader">
+      <div class="app-title">Radnor Wildlife Watch</div>
+      <button id="infoBtn" class="header-info-btn" type="button">
+        Info
+      </button>
+    </div>
+
+    <div id="panel" class="glass-card collapsed">
+      <button id="drawerHandle" class="drawer-handle">▲</button>
+
+      <div class="panel-scroll">
+        <div class="panel-section filter-group">
+          <div class="section-title">Filter by Species</div>
         
-    </head>
+          <label for="speciesFilter" class="sr-only">Species filter</label>
+          <select id="speciesFilter">
+            <option value="">All species</option>
+          </select>
+        
+          <label for="recentOnly" class="checkbox-row custom-check">
+            <input type="checkbox" id="recentOnly" />
+            <span class="checkmark"></span>
+            <span class="check-label">Recent sightings (7 days)</span>
+          </label>
 
-    <body>
-        <!--put your initial page content here-->
+          <label for="trailFilter">Filter by Trail</label>
+          <select id="trailFilter">
+            <option value="">All trails</option>
+          </select>
+        </div>
 
-        <!--you can also use this space for internal scripts;
-        place these within <script> tags-->
 
-        <!--put your external script links here-->
-        <script src="d3.js"></script>
-        <script type="text/javascript" src="js/main.js"></script>
-    </body>
+        <div class="panel-section actions">
+          <button id="locateBtn" class="secondary-btn">Find Me</button>
+          <button id="openSightingBtn" class="primary-btn">Add Sighting</button>
+        </div>
+
+        <div id="addSightingPanel" class="hidden">
+          <h3>Report a Sighting</h3>
+          <p id="sightingHelp" class="helper-text">Tap the map to place your sighting.</p>
+
+          <label for="sightingSpecies" class="section-title">Species</label>
+          <select id="sightingSpecies">
+            <option value="">Choose a species</option>
+            <option value="__other__">Other / Not listed</option>
+          </select>
+
+          <div id="newSpeciesFields" class="hidden">
+            <label for="newSpeciesCommonName">New species name</label>
+            <input
+              type="text"
+              id="newSpeciesCommonName"
+              maxlength="100"
+              placeholder="Enter common name"
+            />
+
+            <label for="newSpeciesScientificName">Scientific name (optional)</label>
+            <input
+              type="text"
+              id="newSpeciesScientificName"
+              maxlength="150"
+              placeholder="Enter scientific name"
+            />
+
+            <label for="newSpeciesCategory">Category</label>
+            <select id="newSpeciesCategory">
+              <option value="">Choose a category</option>
+              <option value="Bird">Bird</option>
+              <option value="Mammal">Mammal</option>
+              <option value="Reptile">Reptile</option>
+              <option value="Amphibian">Amphibian</option>
+              <option value="Fish">Fish</option>
+              <option value="Insect">Insect</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+
+          <label for="sightingDescription">Description</label>
+          <textarea
+              id="sightingDescription"
+              rows="3"
+              maxlength="200"
+              placeholder="What did you see?"
+            ></textarea>
+          
+          <div id="selectedLocation" class="location-pill">No location selected</div>
+          <div id="selectedTrail" class="location-pill">No trail selected</div>
+
+          <div class="actions">
+            <button id="cancelSightingBtn" class="secondary-btn">Cancel</button>
+            <button id="submitSightingBtn" class="primary-btn">Submit</button>
+          </div>
+        </div>
+
+        <details id="legendDetails" class="legend-details">
+          <summary>Map Legend</summary>
+          <div id="legend">
+          
+            <div class="legend-section">Trails</div>
+            <div id="trailLegend" class="legend-grid"></div>
+            <div class="legend-section">Wildlife</div>
+            <div class="legend-grid">
+              <div class="legend-item"><span class="legend-circle bird"></span>Bird</div>
+              <div class="legend-item"><span class="legend-circle mammal"></span>Mammal</div>
+              <div class="legend-item"><span class="legend-circle reptile"></span>Reptile</div>
+              <div class="legend-item"><span class="legend-circle amphibian"></span>Amphibian</div>
+              <div class="legend-item"><span class="legend-circle fish"></span>Fish</div>
+              <div class="legend-item"><span class="legend-circle insect"></span>Insect</div>
+            </div>
+            <div class="legend-section">Facilities</div>
+            <div class="legend-grid">
+              <div class="legend-item"><span class="legend-diamond facility"></span>Facility</div>
+              <div class="legend-item"><span class="legend-diamond waypoint"></span>Mileage & Viewable Waypoints</div>
+            </div>
+            <div class="legend-section">Other</div>
+            <div class="legend-grid">
+              <div class="legend-item"><span class="legend-box lake"></span>Lake</div>
+              <div class="legend-item"><span class="legend-line river"></span>River</div>
+              <div class="legend-item"><span class="legend-protected"></span>Eagle Protection Zone</div>
+            </div>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <div id="infoPanel" class="info-panel hidden">
+      <div class="info-panel-header">
+        <h2>About This App</h2>
+        <button id="closeInfoBtn" class="info-close-btn" type="button" aria-label="Close information panel">×</button>
+      </div>
+    
+      <div class="info-panel-content">
+        <div class="info-section">
+          <h3>Wildlife and Park Use</h3>
+          <p>
+            Please respect wildlife and follow park rules while using this application. Visitors should remain
+            on approved public routes and avoid disturbing animals or entering sensitive habitat areas.
+          </p>
+          <p>
+            The <b>Eagle Protection Zone</b> is a restricted habitat area shown on the map to communicate
+            wildlife protection and responsible park use. This area should not be entered by visitors.
+          </p>
+        </div>
+    
+        <div class="info-section">
+          <h3>Educational Purpose</h3>
+          <p>
+            This application was created as an educational project and is intended to demonstrate web mapping,
+            park-oriented user experience design, interactive filtering, and spatial data visualization.
+          </p>
+        </div>
+    
+        <div class="info-section">
+          <h3>Wildlife Sightings Disclaimer</h3>
+          <p>
+            Wildlife sightings displayed in this app are <b>mock data</b>. They were created for demonstration
+            purposes to support application functionality such as map display, filtering, trail-based queries,
+            and user submission workflow examples.
+          </p>
+        </div>
+    
+        <div class="info-section">
+          <h3>Data Sources</h3>
+          <p>
+            Park layers and reference content used in this application were compiled from public, educational,
+            and project reference materials. Species information was informed by publicly available Radnor Lake
+            reference content and related park information.
+          </p>
+          <p>
+            This application is not official park guidance and should not be treated as an authoritative source
+            for wildlife records, restricted area enforcement, or operational park decisions.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.pattern/leaflet.pattern.js"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script src="js/main.js"></script>
+</body>
 </html>
