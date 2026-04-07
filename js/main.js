@@ -10,7 +10,7 @@ const map = L.map("map", {
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   maxZoom: 20,
-  attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+  attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
 }).addTo(map);
 
 let parkLayer;
@@ -18,9 +18,10 @@ let trailsLayer;
 let facilitiesLayer;
 let waypointFacilitiesLayer;
 let sightingsLayer;
+let habitatsLayer;
+let riverLayer;
+let lakeLayer;
 let userLocationLayer;
-let parkBounds = null;
-let parkHomeZoom = null;
 
 let selectedSightingLatLng = null;
 let selectedSightingMarker = null;
@@ -30,10 +31,17 @@ let isAddingSighting = false;
 let trailLookup = [];
 let trailNameById = {};
 let uniqueTrailNames = [];
+let speciesOptions = [];
 
-let habitatsLayer;
-let riverLayer;
-let lakeLayer;
+let parkBounds = null;
+let parkHomeZoom = null;
+let previousPanelState = "collapsed";
+
+let selectedSpeciesFilter = "";
+let selectedTrailFilter = "";
+
+let currentFilterType = null;
+let currentFilterTarget = null;
 
 function showToast(message) {
   const toast = document.getElementById("toast");
@@ -42,7 +50,8 @@ function showToast(message) {
   toast.textContent = message;
   toast.classList.remove("hidden");
 
-  setTimeout(() => {
+  clearTimeout(showToast._timer);
+  showToast._timer = setTimeout(() => {
     toast.classList.add("hidden");
   }, 2500);
 }
@@ -56,6 +65,10 @@ function setPanelState(state) {
   const handle = document.getElementById("drawerHandle");
   if (!panel) return;
 
+  if (state !== "adding") {
+    previousPanelState = state;
+  }
+
   panel.classList.remove("collapsed", "expanded", "adding");
   panel.classList.add(state);
 
@@ -67,7 +80,6 @@ function setPanelState(state) {
 function setupDrawer() {
   const handle = document.getElementById("drawerHandle");
   const panel = document.getElementById("panel");
-
   if (!handle || !panel) return;
 
   handle.addEventListener("click", () => {
@@ -79,9 +91,48 @@ function setupDrawer() {
   });
 }
 
+function getMarkerStyle(category) {
+  const styles = {
+    Bird: { radius: 7, fillColor: "#e0a800" },
+    Mammal: { radius: 7, fillColor: "#a1475b" },
+    Reptile: { radius: 7, fillColor: "#00897b" },
+    Amphibian: { radius: 7, fillColor: "#43a047" },
+    Fish: { radius: 7, fillColor: "#1e88e5" },
+    Insect: { radius: 7, fillColor: "#8e24aa" }
+  };
 
+  const base = styles[category] || {
+    radius: 7,
+    fillColor: "#546e7a"
+  };
 
-function getHabitatStyle(habitatType) {
+  return {
+    radius: base.radius,
+    color: "#2f3e36",
+    fillColor: base.fillColor,
+    weight: 2,
+    fillOpacity: 1
+  };
+}
+
+function getTrailColor(blazeColor) {
+  const value = (blazeColor || "").toLowerCase();
+
+  if (value.includes("purple")) return "#7e6bbf";
+  if (value.includes("blue")) return "#3f7fbf";
+  if (value.includes("dark green")) return "#2e6f4f";
+  if (value.includes("green")) return "#3f8a5f";
+  if (value.includes("red")) return "#c65a5a";
+  if (value.includes("yellow")) return "#d1a93a";
+  if (value.includes("orange")) return "#c7783a";
+  if (value.includes("brown")) return "#8a6a4a";
+  if (value.includes("white")) return "#4a4a4a";
+  if (value.includes("pink")) return "#d67fa6";
+
+  return "#6b7f75";
+}
+
+function getHabitatStyle() {
   return {
     color: "#a44e4e",
     weight: 3,
@@ -89,261 +140,6 @@ function getHabitatStyle(habitatType) {
     fillColor: "#d98f8f",
     fillOpacity: 0.18
   };
-}
-
-async function loadHabitats() {
-  const { data, error } = await supabaseClient
-    .from("habitat")
-    .select(`
-      habitat_id,
-      park_id,
-      name,
-      type,
-      public_access,
-      shape
-    `);
-
-  if (error) {
-    console.error("Error loading habitats:", error);
-    return;
-  }
-
-
-  const geojson = {
-    type: "FeatureCollection",
-    features: data
-      .filter((row) => row.shape)
-      .map((row) => ({
-        type: "Feature",
-        geometry: row.shape,
-        properties: row
-      }))
-  };
-
-  if (habitatsLayer) {
-    map.removeLayer(habitatsLayer);
-  }
-
-  habitatsLayer = L.geoJSON(geojson, {
-    style: function (feature) {
-      return getHabitatStyle(feature.properties.habitat_type);
-    },
-    onEachFeature: function (feature, layer) {
-      layer.on("click", function (e) {
-        if (isAddingSighting) return;
-
-        const p = feature.properties;
-        layer.bindPopup(`
-          <b>Eagle Protection Zone</b><br>
-          <b>Status:</b> Restricted Area<br>
-          <b>Access:</b> No public entry<br>
-          <i>Protected habitat for nesting eagles</i>
-        `).openPopup(e.latlng);
-        layer.on("mouseover", function () {
-          this.setStyle({
-            fillOpacity: 0.35
-          });
-        });
-        
-        layer.on("mouseout", function () {
-          this.setStyle({
-            fillOpacity: 0.25
-          });
-        });
-      });
-    }
-  }).addTo(map);
-}
-
-function setupSplashScreen() {
-  const splash = document.getElementById("splashScreen");
-  const enterBtn = document.getElementById("enterAppBtn");
-
-  if (!splash || !enterBtn) return;
-
-  enterBtn.addEventListener("click", () => {
-    splash.classList.add("hidden");
-  });
-}
-
-function setupInfoPanel() {
-  const infoBtn = document.getElementById("infoBtn");
-  const infoPanel = document.getElementById("infoPanel");
-  const closeInfoBtn = document.getElementById("closeInfoBtn");
-
-  if (!infoBtn || !infoPanel || !closeInfoBtn) return;
-
-  infoBtn.addEventListener("click", () => {
-    infoPanel.classList.remove("hidden");
-  });
-
-  closeInfoBtn.addEventListener("click", () => {
-    infoPanel.classList.add("hidden");
-  });
-}
-
-
-
-async function loadRiver() {
-  const { data, error } = await supabaseClient
-    .from("river")
-    .select(`
-      river_id,
-      park_id,
-      shape
-    `);
-
-  if (error) {
-    console.error("Error loading river:", error);
-    return;
-  }
-
-  const geojson = {
-    type: "FeatureCollection",
-    features: data
-      .filter((row) => row.shape)
-      .map((row) => ({
-        type: "Feature",
-        geometry: row.shape,
-        properties: row
-      }))
-  };
-
-  if (riverLayer) {
-    map.removeLayer(riverLayer);
-  }
-
-  riverLayer = L.geoJSON(geojson, {
-    style: {
-      color: "#4f88b7",
-      weight: 3,
-      opacity: .35
-    },
-    onEachFeature: function (feature, layer) {
-      layer.on("click", function (e) {
-        if (isAddingSighting) return;
-
-        const p = feature.properties;
-      });
-    }
-  }).addTo(map);
-}
-
-async function loadLake() {
-  const { data, error } = await supabaseClient
-    .from("lake")
-    .select(`
-      lake_id,
-      park_id,
-      shape
-    `);
-
-  if (error) {
-    console.error("Error loading lake:", error);
-    return;
-  }
-
-  const geojson = {
-    type: "FeatureCollection",
-    features: data
-      .filter((row) => row.shape)
-      .map((row) => ({
-        type: "Feature",
-        geometry: row.shape,
-        properties: row
-      }))
-  };
-
-  if (lakeLayer) {
-    map.removeLayer(lakeLayer);
-  }
-
-  lakeLayer = L.geoJSON(geojson, {
-    style: {
-      color: "#5f9fc7",
-      weight: 2,
-      fillColor: "#9ecfe6",
-      fillOpacity: 0.35
-    },
-    onEachFeature: function (feature, layer) {
-      layer.on("click", function (e) {
-        if (isAddingSighting) return;
-
-        const p = feature.properties;
-      });
-    }
-  }).addTo(map);
-}
-
-function getMarkerStyle(category) {
-
-  const styles = {
-    "Bird": {
-      radius: 5,
-      fillColor: "#c9a44b"
-    },
-    "Mammal": {
-      radius: 5,
-      fillColor: "#4f7d64"
-    },
-    "Reptile": {
-      radius: 5,
-      fillColor: "#5f8f95"
-    },
-    "Amphibian": {
-      radius: 5,
-      fillColor: "#6aa84f"
-    },
-    "Fish": {
-      radius: 5,
-      fillColor: "#4a90e2"
-    },
-    "Insect": {
-      radius: 5,
-      fillColor: "#b57edc"
-    }
-  };
-
-  const baseStyle = styles[category] || {
-    radius: 5,
-    fillColor: "#7a9e8b"
-  };
-
-  return {
-    radius: baseStyle.radius,
-    color: "#2f3e36",        
-    fillColor: baseStyle.fillColor,
-    weight: 1.5,
-    fillOpacity: 0.95
-  };
-}
-
-function getTrailColor(color) {
-  switch ((color || "").toLowerCase()) {
-    case "purple": return "#7e6bbf";
-    case "blue": return "#3f7fbf";
-    case "dark green": return "#2e6f4f";
-    case "red": return "#c65a5a";
-    case "yellow": return "#d1a93a";
-    case "orange": return "#c7783a";
-    case "brown": return "#8a6a4a";
-    case "white": return "#4a4a4a";
-    case "pink": return "#d67fa6";
-    default: return "#6b7f75";
-  }
-}
-
-function toggleNewSpeciesFields() {
-  const speciesSelect = document.getElementById("sightingSpecies");
-  const newSpeciesFields = document.getElementById("newSpeciesFields");
-
-  if (!speciesSelect || !newSpeciesFields) return;
-
-  if (speciesSelect.value === "__other__") {
-    newSpeciesFields.classList.remove("hidden");
-  } else {
-    newSpeciesFields.classList.add("hidden");
-  }
 }
 
 function getDistanceMeters(lat1, lng1, lat2, lng2) {
@@ -355,8 +151,10 @@ function getDistanceMeters(lat1, lng1, lat2, lng2) {
 
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
 
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
@@ -403,7 +201,6 @@ function getClosestTrail(latlng) {
 
 function updateSelectedTrailDisplay(trail) {
   const trailDisplay = document.getElementById("selectedTrail");
-
   if (!trailDisplay) return;
 
   if (!trail) {
@@ -414,6 +211,280 @@ function updateSelectedTrailDisplay(trail) {
 
   selectedTrailId = trail.trail_id;
   trailDisplay.textContent = `Closest trail: ${trail.trail_name}`;
+}
+
+function toggleNewSpeciesFields() {
+  const speciesInput = document.getElementById("sightingSpecies");
+  const newSpeciesFields = document.getElementById("newSpeciesFields");
+
+  if (!speciesInput || !newSpeciesFields) return;
+
+  if (speciesInput.value === "__other__") {
+    newSpeciesFields.classList.remove("hidden");
+  } else {
+    newSpeciesFields.classList.add("hidden");
+  }
+}
+
+function updateFilterButtons() {
+  const speciesValue = document.getElementById("speciesFilterValue");
+  const trailValue = document.getElementById("trailFilterValue");
+
+  if (speciesValue) {
+    speciesValue.textContent = selectedSpeciesFilter || "All species";
+  }
+
+  if (trailValue) {
+    trailValue.textContent = selectedTrailFilter || "All trails";
+  }
+}
+
+function updateSightingSpeciesButton() {
+  const speciesInput = document.getElementById("sightingSpecies");
+  const speciesValue = document.getElementById("sightingSpeciesValue");
+
+  if (!speciesInput || !speciesValue) return;
+
+  if (!speciesInput.value) {
+    speciesValue.textContent = "Choose a species";
+  } else if (speciesInput.value === "__other__") {
+    speciesValue.textContent = "Other / Not listed";
+  } else {
+    speciesValue.textContent = speciesInput.value;
+  }
+}
+
+function setupFilterButtons() {
+  const speciesBtn = document.getElementById("speciesFilterBtn");
+  const trailBtn = document.getElementById("trailFilterBtn");
+  const sightingSpeciesBtn = document.getElementById("sightingSpeciesBtn");
+  const recentOnly = document.getElementById("recentOnly");
+
+  if (speciesBtn) {
+    speciesBtn.addEventListener("click", () => openFilterSheet("species", "filter"));
+  }
+
+  if (trailBtn) {
+    trailBtn.addEventListener("click", () => openFilterSheet("trail", "filter"));
+  }
+
+  if (sightingSpeciesBtn) {
+    sightingSpeciesBtn.addEventListener("click", () => openFilterSheet("species", "sighting"));
+  }
+
+  if (recentOnly) {
+    recentOnly.addEventListener("change", loadSightings);
+  }
+
+  updateFilterButtons();
+  updateSightingSpeciesButton();
+}
+
+function getFilterItems(type) {
+  if (type === "species") {
+    const baseItems = speciesOptions.map((name) => ({ value: name, label: name }));
+
+    if (currentFilterTarget === "sighting") {
+      return [
+        { value: "", label: "Choose a species" },
+        { value: "__other__", label: "Other / Not listed" },
+        ...baseItems
+      ];
+    }
+
+    return [
+      { value: "", label: "All species" },
+      ...baseItems
+    ];
+  }
+
+  if (type === "trail") {
+    return [
+      { value: "", label: "All trails" },
+      ...uniqueTrailNames.map((name) => ({ value: name, label: name }))
+    ];
+  }
+
+  return [];
+}
+
+function getCurrentFilterValue(type) {
+  if (type === "species" && currentFilterTarget === "sighting") {
+    return document.getElementById("sightingSpecies")?.value || "";
+  }
+
+  return type === "species" ? selectedSpeciesFilter : selectedTrailFilter;
+}
+
+function renderFilterOptions() {
+  const list = document.getElementById("filterOptionsList");
+  const input = document.getElementById("filterSearchInput");
+  if (!list || !currentFilterType) return;
+
+  const search = (input?.value || "").trim().toLowerCase();
+  const items = getFilterItems(currentFilterType).filter((item) =>
+    item.label.toLowerCase().includes(search)
+  );
+
+  list.innerHTML = "";
+
+  if (!items.length) {
+    list.innerHTML = `<div class="filter-option-empty">No matches found</div>`;
+    return;
+  }
+
+  const selectedValue = getCurrentFilterValue(currentFilterType);
+
+  items.forEach((item) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "filter-option-btn";
+
+    if (item.value === selectedValue) {
+      btn.classList.add("is-selected");
+    }
+
+    btn.textContent = item.label;
+    btn.addEventListener("click", () => setCurrentFilterValue(currentFilterType, item.value));
+    list.appendChild(btn);
+  });
+}
+
+function openFilterSheet(type, target = "filter") {
+  currentFilterType = type;
+  currentFilterTarget = target;
+
+  const sheet = document.getElementById("filterSheet");
+  const title = document.getElementById("filterSheetTitle");
+  const subtitle = document.getElementById("filterSheetSubtitle");
+  const input = document.getElementById("filterSearchInput");
+
+  if (!sheet || !title || !subtitle || !input) return;
+
+  if (type === "species" && target === "sighting") {
+    title.textContent = "Species";
+    subtitle.textContent = "Choose a species for this sighting";
+    input.placeholder = "Search species";
+  } else if (type === "species") {
+    title.textContent = "Species";
+    subtitle.textContent = "Select a species";
+    input.placeholder = "Search species";
+  } else {
+    title.textContent = "Trails";
+    subtitle.textContent = "Select a trail";
+    input.placeholder = "Search trails";
+  }
+
+  input.value = "";
+  sheet.classList.remove("hidden");
+  renderFilterOptions();
+
+  setTimeout(() => input.focus(), 50);
+}
+
+function closeFilterSheet() {
+  const sheet = document.getElementById("filterSheet");
+  if (sheet) {
+    sheet.classList.add("hidden");
+  }
+  currentFilterType = null;
+  currentFilterTarget = null;
+}
+
+function setCurrentFilterValue(type, value) {
+  if (type === "species" && currentFilterTarget === "sighting") {
+    const speciesInput = document.getElementById("sightingSpecies");
+    if (speciesInput) {
+      speciesInput.value = value;
+    }
+
+    updateSightingSpeciesButton();
+    toggleNewSpeciesFields();
+    closeFilterSheet();
+    return;
+  }
+
+  if (type === "species") {
+    selectedSpeciesFilter = value;
+  } else if (type === "trail") {
+    selectedTrailFilter = value;
+  }
+
+  updateFilterButtons();
+  closeFilterSheet();
+  loadSightings();
+  setPanelState("collapsed");
+}
+
+function setupFilterSheet() {
+  const closeBtn = document.getElementById("closeFilterSheetBtn");
+  const input = document.getElementById("filterSearchInput");
+
+  if (closeBtn) {
+    closeBtn.addEventListener("click", closeFilterSheet);
+  }
+
+  if (input) {
+    input.addEventListener("input", renderFilterOptions);
+  }
+}
+
+function setupSplashScreen() {
+  const splash = document.getElementById("splashScreen");
+  const enterBtn = document.getElementById("enterAppBtn");
+
+  if (!splash || !enterBtn) return;
+
+  const closeSplash = () => splash.classList.add("hidden");
+
+  enterBtn.addEventListener("click", closeSplash);
+  enterBtn.addEventListener(
+    "touchend",
+    (e) => {
+      e.preventDefault();
+      closeSplash();
+    },
+    { passive: false }
+  );
+}
+
+function setupInfoPanel() {
+  const infoBtn = document.getElementById("infoBtn");
+  const infoPanel = document.getElementById("infoPanel");
+  const closeInfoBtn = document.getElementById("closeInfoBtn");
+
+  if (!infoBtn || !infoPanel || !closeInfoBtn) return;
+
+  infoBtn.addEventListener("click", () => {
+    infoPanel.classList.remove("hidden");
+  });
+
+  closeInfoBtn.addEventListener("click", () => {
+    infoPanel.classList.add("hidden");
+  });
+}
+
+function populateTrailLegend(trails) {
+  const container = document.getElementById("trailLegend");
+  if (!container) return;
+
+  container.innerHTML = "";
+  const seen = new Set();
+
+  trails.forEach((t) => {
+    const name = t.trail_name;
+    const blaze = t.blaze_color;
+    if (!name || seen.has(name)) return;
+    seen.add(name);
+
+    const item = document.createElement("div");
+    item.className = "legend-item";
+    item.innerHTML = `
+      <span class="legend-line" style="background:${getTrailColor(blaze)};"></span>
+      ${name}
+    `;
+    container.appendChild(item);
+  });
 }
 
 async function loadPark() {
@@ -437,9 +508,7 @@ async function loadPark() {
       }))
   };
 
-  if (parkLayer) {
-    map.removeLayer(parkLayer);
-  }
+  if (parkLayer) map.removeLayer(parkLayer);
 
   parkLayer = L.geoJSON(geojson, {
     style: {
@@ -457,10 +526,9 @@ async function loadPark() {
 
   if (parkLayer.getBounds().isValid()) {
     parkBounds = parkLayer.getBounds().pad(0.08);
-  
     map.setMaxBounds(parkBounds);
     map.fitBounds(parkBounds);
-  
+
     map.once("zoomend", () => {
       parkHomeZoom = map.getZoom();
       map.setMinZoom(parkHomeZoom);
@@ -468,111 +536,153 @@ async function loadPark() {
   }
 }
 
-function populateTrailLegend(trails) {
-  const container = document.getElementById("trailLegend");
-  if (!container) return;
-
-  container.innerHTML = "";
-
-  const seen = new Set();
-
-  trails.forEach((t) => {
-    const name = t.trail_name;
-    const color = t.blaze_color;
-
-    if (!name || seen.has(name)) return;
-    seen.add(name);
-
-    const item = document.createElement("div");
-    item.className = "legend-item";
-
-    item.innerHTML = `
-      <span class="legend-line" style="background:${getTrailColor(color)};"></span>
-      ${name}
-    `;
-
-    container.appendChild(item);
-  });
-}
-
-async function loadTrails() {
+async function loadLake() {
   const { data, error } = await supabaseClient
-    .from("trail")
+    .from("lake")
     .select(`
-      trail_id,
-      trail_name,
-      blaze_color,
-      trail_surface,
-      accessible,
-      dogs_allowed,
-      bicycles_allowed,
-      all_terrain_wheelchair,
-      length_mi,
+      lake_id,
+      park_id,
+      area_sq_km,
+      shape_len,
+      shape_area,
       shape
     `);
 
   if (error) {
-    console.error("Error loading trails:", error);
+    console.error("Error loading lake:", error);
     return;
   }
-
-  trailLookup = [];
-  trailNameById = {};
-
-  populateTrailLegend(data);
-
-  const trailNameSet = new Set();
 
   const geojson = {
     type: "FeatureCollection",
     features: data
       .filter((row) => row.shape)
-      .map((row) => {
-        const trailName = row.trail_name || `Trail ${row.trail_id}`;
-
-        trailNameById[row.trail_id] = trailName;
-        trailNameSet.add(trailName);
-
-        const layerTemp = L.geoJSON({
-          type: "Feature",
-          geometry: row.shape,
-          properties: {}
-        });
-
-        let latlngs = [];
-        layerTemp.eachLayer((l) => {
-          if (l.getLatLngs) {
-            latlngs = flattenLatLngs(l.getLatLngs());
-          }
-        });
-
-        trailLookup.push({
-          trail_id: row.trail_id,
-          trail_name: trailName,
-          latlngs
-        });
-
-        return {
-          type: "Feature",
-          geometry: row.shape,
-          properties: row
-        };
-      })
+      .map((row) => ({
+        type: "Feature",
+        geometry: row.shape,
+        properties: row
+      }))
   };
 
-  uniqueTrailNames = Array.from(trailNameSet).sort();
-
-  if (trailsLayer) {
-    map.removeLayer(trailsLayer);
+  if (lakeLayer) {
+    map.removeLayer(lakeLayer);
   }
 
-  trailsLayer = L.geoJSON(geojson, {
-    style: function (feature) {
-      return {
-        color: getTrailColor(feature.properties.blaze_color),
-        weight: 3,
-        opacity: 0.95
-      };
+  lakeLayer = L.geoJSON(geojson, {
+    style: {
+      color: "#5f9fc7",
+      weight: 2,
+      fillColor: "#9ecfe6",
+      fillOpacity: 0.35
+    },
+    onEachFeature: function (feature, layer) {
+      layer.on("click", function (e) {
+        if (isAddingSighting) return;
+
+        const p = feature.properties;
+      });
+    }
+  }).addTo(map);
+}
+
+async function loadHabitats() {
+  const { data, error } = await supabaseClient
+    .from("habitat")
+    .select(`
+      habitat_id,
+      park_id,
+      name,
+      type,
+      public_access,
+      shape
+    `);
+
+  if (error) {
+    console.error("Error loading habitats:", error);
+    return;
+  }
+
+  const geojson = {
+    type: "FeatureCollection",
+    features: data
+      .filter((row) => row.shape)
+      .map((row) => ({
+        type: "Feature",
+        geometry: row.shape,
+        properties: row
+      }))
+  };
+
+  if (habitatsLayer) {
+    map.removeLayer(habitatsLayer);
+  }
+
+  habitatsLayer = L.geoJSON(geojson, {
+    style: getHabitatStyle(),
+    onEachFeature: function (feature, layer) {
+      layer.on("click", function (e) {
+        if (isAddingSighting) return;
+
+        const p = feature.properties;
+        layer.bindPopup(`
+          <b>Eagle Protection Zone</b><br>
+          <b>Status:</b> Restricted Area<br>
+          <b>Access:</b> No public entry<br>
+          <i>Protected habitat for nesting eagles</i>
+        `).openPopup(e.latlng);
+      });
+
+      layer.on("mouseover", function () {
+        this.setStyle({
+          fillOpacity: 0.3
+        });
+      });
+
+      layer.on("mouseout", function () {
+        this.setStyle({
+          fillOpacity: 0.18
+        });
+      });
+    }
+  }).addTo(map);
+}
+
+async function loadRiver() {
+  const { data, error } = await supabaseClient
+    .from("river")
+    .select(`
+      river_id,
+      park_id,
+      length_km,
+      shape_len,
+      shape
+    `);
+
+  if (error) {
+    console.error("Error loading river:", error);
+    return;
+  }
+
+  const geojson = {
+    type: "FeatureCollection",
+    features: data
+      .filter((row) => row.shape)
+      .map((row) => ({
+        type: "Feature",
+        geometry: row.shape,
+        properties: row
+      }))
+  };
+
+  if (riverLayer) {
+    map.removeLayer(riverLayer);
+  }
+
+  riverLayer = L.geoJSON(geojson, {
+    style: {
+      color: "#4f88b7",
+      weight: 3,
+      opacity: 0.35
     },
     onEachFeature: function (feature, layer) {
       layer.on("click", function (e) {
@@ -580,20 +690,13 @@ async function loadTrails() {
 
         const p = feature.properties;
         layer.bindPopup(`
-          <b>${p.trail_name ?? "Trail"}</b><br>
-          <b>Blaze:</b> ${p.blaze_color ?? "N/A"}<br>
-          <b>Surface:</b> ${p.trail_surface ?? "N/A"}<br>
-          <b>Accessible:</b> ${p.accessible ?? "No"}<br>
-          <b>Dogs Allowed:</b> ${p.dogs_allowed ?? "No"}<br>
-          <b>Bicycles Allowed:</b> ${p.bicycles_allowed ?? "No"}<br>
-          <b>All Terrain Wheelchair:</b> ${p.all_terrain_wheelchair ?? "No"}<br>
-          <b>Length (mi):</b> ${p.length_mi ?? "N/A"}
+          <b>River / Stream</b><br>
+          <b>Length (km):</b> ${p.length_km ?? "N/A"}<br>
+          <b>Shape Length:</b> ${p.shape_len ?? "N/A"}
         `).openPopup(e.latlng);
       });
     }
   }).addTo(map);
-
-  populateTrailFilter();
 }
 
 function getFacilityCategory(p) {
@@ -607,6 +710,52 @@ function getFacilityCategory(p) {
   if (name === "Viewable Waypoint") return "Viewable Waypoint";
 
   return "Facility";
+}
+
+function getFacilityStyle(category) {
+  switch (category) {
+    case "Visitor Center":
+      return {
+        color: "#6a6f63",
+        fillColor: "rgb(197, 196, 119)"
+      };
+
+    case "Parking":
+      return {
+        color: "#6a6f63",
+        fillColor: "rgb(197, 196, 119)"
+      };
+
+    case "Education Center":
+      return {
+        color: "#6a6f63",
+        fillColor: "rgb(197, 196, 119)"
+      };
+
+    case "Observatory":
+      return {
+        color: "#6a6f63",
+        fillColor: "rgb(197, 196, 119)"
+      };
+
+    case "Mileage Waypoint":
+      return {
+        color: "#6a6f63",
+        fillColor: "#98d181"
+      };
+
+    case "Viewable Waypoint":
+      return {
+        color: "#6a6f63",
+        fillColor: "#75dbac"
+      };
+
+    default:
+      return {
+        color: "#6a6f63",
+        fillColor: "rgb(197, 196, 119)"
+      };
+  }
 }
 
 function bindFacilityPopup(feature, layer) {
@@ -626,24 +775,6 @@ function bindFacilityPopup(feature, layer) {
       <b>EV Charging:</b> ${p.ev_charging ?? "No"}
     `).openPopup(e.latlng);
   });
-}
-
-function getFacilityStyle(category) {
-  switch (category) {
-    case "Visitor Center":
-      return { color: "#4b5a52", fillColor: "#cbbd8f" };
-    case "Parking":
-      return { color: "#4b5a52", fillColor: "#a7b7be" };
-    case "Education Center":
-      return { color: "#4b5a52", fillColor: "#b0a4c9" };
-    case "Observatory":
-      return { color: "#4b5a52", fillColor: "#9fb9c7" };
-    case "Mileage Waypoint":
-    case "Viewable Waypoint":
-      return { color: "#5d6a63", fillColor: "#d5ddd8" };
-    default:
-      return { color: "#4b5a52", fillColor: "#b7c3bc" };
-  }
 }
 
 async function loadFacilities() {
@@ -720,7 +851,7 @@ async function loadFacilities() {
       return L.marker(latlng, {
         icon: L.divIcon({
           className: "facility-icon-wrapper",
-          html: `<div class="facility-icon"></div>`,
+          html: `<div class="facility-icon" style="background:${style.fillColor}; border:2px solid ${style.color};"></div>`,
           iconSize: [12, 12],
           iconAnchor: [6, 6]
         })
@@ -732,11 +863,17 @@ async function loadFacilities() {
   waypointFacilitiesLayer = L.geoJSON(waypointGeojson, {
     pointToLayer: function (feature, latlng) {
       const style = getFacilityStyle(feature.properties.facility_category);
-
+      const cat = feature.properties.facility_category;
+  
+      const extraClass =
+        cat === "Mileage Waypoint"
+          ? "facility-icon-mileage"
+          : "facility-icon-viewpoint";
+  
       return L.marker(latlng, {
         icon: L.divIcon({
           className: "facility-icon-wrapper",
-          html: `<div class="facility-icon facility-icon-waypoint" style="
+          html: `<div class="facility-icon ${extraClass}" style="
             background:${style.fillColor};
             border:1.5px solid ${style.color};
           "></div>`,
@@ -768,63 +905,142 @@ function toggleWaypointFacilities() {
   }
 }
 
-async function populateSpeciesFilter() {
+async function populateSpeciesOptions() {
   const { data, error } = await supabaseClient
     .from("wildlife_species")
     .select("common_name")
     .order("common_name");
 
   if (error) {
-    console.error("Error loading species filter:", error);
+    console.error("Error loading species options:", error);
     return;
   }
 
-  const filterSelect = document.getElementById("speciesFilter");
-  const sightingSelect = document.getElementById("sightingSpecies");
-  const recentOnly = document.getElementById("recentOnly");
+  speciesOptions = data.map((row) => row.common_name);
 
-  if (!filterSelect || !sightingSelect) return;
-
-  filterSelect.innerHTML = `<option value="">All species</option>`;
-  sightingSelect.innerHTML = `
-    <option value="">Choose a species</option>
-    <option value="__other__">Other / Not listed</option>
-  `;
-
-  data.forEach((row) => {
-    const option1 = document.createElement("option");
-    option1.value = row.common_name;
-    option1.textContent = row.common_name;
-    filterSelect.appendChild(option1);
-
-    const option2 = document.createElement("option");
-    option2.value = row.common_name;
-    option2.textContent = row.common_name;
-    sightingSelect.appendChild(option2);
-  });
-
-  filterSelect.onchange = loadSightings;
-  sightingSelect.onchange = toggleNewSpeciesFields;
-
-  if (recentOnly) {
-    recentOnly.onchange = loadSightings;
-  }
+  updateFilterButtons();
+  updateSightingSpeciesButton();
 }
 
-function populateTrailFilter() {
-  const trailFilter = document.getElementById("trailFilter");
-  if (!trailFilter) return;
+async function loadTrails() {
+  const { data, error } = await supabaseClient
+    .from("trail")
+    .select(`
+      trail_id,
+      trail_name,
+      blaze_color,
+      trail_surface,
+      accessible,
+      dogs_allowed,
+      bicycles_allowed,
+      all_terrain_wheelchair,
+      length_mi,
+      segment_type,
+      shape
+    `);
 
-  trailFilter.innerHTML = `<option value="">All trails</option>`;
+  if (error) {
+    console.error("Error loading trails:", error);
+    return;
+  }
 
-  uniqueTrailNames.forEach((name) => {
-    const option = document.createElement("option");
-    option.value = name;
-    option.textContent = name;
-    trailFilter.appendChild(option);
-  });
+  trailLookup = [];
+  trailNameById = {};
 
-  trailFilter.onchange = loadSightings;
+  const trailNameSet = new Set();
+
+  const geojson = {
+    type: "FeatureCollection",
+    features: data
+      .filter((row) => row.shape)
+      .map((row) => {
+        const trailName = row.trail_name || `Trail ${row.trail_id}`;
+
+        trailNameById[row.trail_id] = trailName;
+        trailNameSet.add(trailName);
+
+        const layerTemp = L.geoJSON({
+          type: "Feature",
+          geometry: row.shape,
+          properties: {}
+        });
+
+        let latlngs = [];
+        layerTemp.eachLayer((l) => {
+          if (l.getLatLngs) {
+            latlngs = flattenLatLngs(l.getLatLngs());
+          }
+        });
+
+        trailLookup.push({
+          trail_id: row.trail_id,
+          trail_name: trailName,
+          latlngs
+        });
+
+        return {
+          type: "Feature",
+          geometry: row.shape,
+          properties: row
+        };
+      })
+  };
+
+  uniqueTrailNames = Array.from(trailNameSet).sort();
+
+  if (trailsLayer) {
+    map.removeLayer(trailsLayer);
+  }
+
+  trailsLayer = L.geoJSON(geojson, {
+    style: function () {
+      return {
+        color: "#000000",
+        weight: 14,
+        opacity: 0,
+        interactive: true
+      };
+    },
+    onEachFeature: function (feature, layer) {
+      const p = feature.properties;
+
+      const visibleTrail = L.geoJSON(feature, {
+        style: {
+          color: getTrailColor(p.blaze_color),
+          weight: 4,
+          opacity: 1
+        },
+        interactive: false
+      }).addTo(map);
+
+      layer.on("click", function (e) {
+        if (isAddingSighting) return;
+
+        layer.bindPopup(`
+          <b>${p.trail_name ?? "Trail"}</b><br>
+          <b>Segment Type:</b> ${p.segment_type ?? "N/A"}<br>
+          <b>Blaze:</b> ${p.blaze_color ?? "N/A"}<br>
+          <b>Surface:</b> ${p.trail_surface ?? "N/A"}<br>
+          <b>Accessible:</b> ${p.accessible ?? "No"}<br>
+          <b>Dogs Allowed:</b> ${p.dogs_allowed ?? "No"}<br>
+          <b>Bicycles Allowed:</b> ${p.bicycles_allowed ?? "No"}<br>
+          <b>All Terrain Wheelchair:</b> ${p.all_terrain_wheelchair ?? "No"}<br>
+          <b>Length (mi):</b> ${p.length_mi ?? "N/A"}
+        `).openPopup(e.latlng);
+      });
+
+      layer.on("mouseover", function () {
+        visibleTrail.setStyle({ weight: 6 });
+      });
+
+      layer.on("mouseout", function () {
+        visibleTrail.setStyle({ weight: 4 });
+      });
+    }
+  }).addTo(map);
+
+  populateTrailLegend(data);
+  updateFilterButtons();
 }
 
 async function loadSightings() {
@@ -855,8 +1071,6 @@ async function loadSightings() {
     speciesLookup[row.species_id] = row;
   });
 
-  const selectedSpecies = document.getElementById("speciesFilter")?.value || "";
-  const selectedTrail = document.getElementById("trailFilter")?.value || "";
   const recentChecked = document.getElementById("recentOnly")?.checked || false;
 
   const now = new Date();
@@ -867,11 +1081,11 @@ async function loadSightings() {
     const speciesName = speciesLookup[row.species_id]?.common_name ?? "";
     const trailName = trailNameById[row.trail_id] ?? "";
 
-    if (selectedSpecies && speciesName !== selectedSpecies) {
+    if (selectedSpeciesFilter && speciesName !== selectedSpeciesFilter) {
       return false;
     }
 
-    if (selectedTrail && trailName !== selectedTrail) {
+    if (selectedTrailFilter && trailName !== selectedTrailFilter) {
       return false;
     }
 
@@ -929,15 +1143,31 @@ function setupLocateButton() {
   const btn = document.getElementById("locateBtn");
   if (!btn) return;
 
+  let locating = false;
+
   btn.addEventListener("click", () => {
-    map.locate({ setView: false, maxZoom: 16 });
+    if (locating) return;
+
+    locating = true;
+    btn.disabled = true;
+    showToast("Getting your location...");
+
+    map.locate({
+      setView: false,
+      maxZoom: 16,
+      enableHighAccuracy: true,
+      timeout: 10000
+    });
   });
 
   map.on("locationfound", (e) => {
+    locating = false;
+    btn.disabled = false;
+
     const inPark = parkBounds && parkBounds.contains(e.latlng);
 
     if (!inPark) {
-      showToast("You are outside the park.");
+      showToast("You are outside the park. Returning to park view.");
 
       if (parkBounds) {
         map.fitBounds(parkBounds);
@@ -963,12 +1193,14 @@ function setupLocateButton() {
       fillOpacity: 0.95
     }).addTo(map);
 
-    userLocationLayer.bindPopup("You are here");
+    userLocationLayer.bindPopup("You are here").openPopup();
     map.setView(e.latlng, Math.max(map.getZoom(), parkHomeZoom || 16));
     showToast("Location found");
   });
 
   map.on("locationerror", (e) => {
+    locating = false;
+    btn.disabled = false;
     console.error(e);
     showToast("Could not get your location");
 
@@ -982,9 +1214,11 @@ function openSightingPanel() {
   isAddingSighting = true;
   document.body.classList.add("adding-sighting");
 
+  const defaultContent = document.getElementById("defaultPanelContent");
   const panel = document.getElementById("addSightingPanel");
   const help = document.getElementById("sightingHelp");
 
+  if (defaultContent) defaultContent.classList.add("hidden");
   if (panel) panel.classList.remove("hidden");
   if (help) help.textContent = "Tap the map to place your sighting.";
 
@@ -998,6 +1232,7 @@ function closeSightingPanel() {
   selectedSightingLatLng = null;
   selectedTrailId = null;
 
+  const defaultContent = document.getElementById("defaultPanelContent");
   const panel = document.getElementById("addSightingPanel");
   const species = document.getElementById("sightingSpecies");
   const description = document.getElementById("sightingDescription");
@@ -1008,6 +1243,7 @@ function closeSightingPanel() {
   const newSpeciesScientificName = document.getElementById("newSpeciesScientificName");
   const newSpeciesCategory = document.getElementById("newSpeciesCategory");
 
+  if (defaultContent) defaultContent.classList.remove("hidden");
   if (panel) panel.classList.add("hidden");
   if (species) species.value = "";
   if (description) description.value = "";
@@ -1017,6 +1253,8 @@ function closeSightingPanel() {
   if (newSpeciesCommonName) newSpeciesCommonName.value = "";
   if (newSpeciesScientificName) newSpeciesScientificName.value = "";
   if (newSpeciesCategory) newSpeciesCategory.value = "";
+
+  updateSightingSpeciesButton();
 
   if (selectedSightingMarker) {
     map.removeLayer(selectedSightingMarker);
@@ -1109,6 +1347,7 @@ async function submitSighting() {
       }
 
       speciesId = insertedSpecies.species_id;
+      await populateSpeciesOptions();
     }
   } else {
     const { data: speciesData, error: speciesError } = await supabaseClient
@@ -1154,7 +1393,6 @@ async function submitSighting() {
 
   showToast("Sighting submitted");
   closeSightingPanel();
-  await populateSpeciesFilter();
   await loadSightings();
 }
 
@@ -1198,29 +1436,34 @@ function setupSightingUI() {
     updateSelectedTrailDisplay(closestTrail);
 
     if (help) {
-      help.textContent = "Location selected. Closest trail picked automatically. Choose species and submit.";
+      help.textContent =
+        "Location selected. Closest trail picked automatically. Choose species and submit.";
     }
 
-    setPanelState("adding");
+    setPanelState("expanded");
   });
 }
 
 async function init() {
+  setupSplashScreen();
+  setupInfoPanel();
+  setupDrawer();
+  setupLocateButton();
+  setupSightingUI();
+  setupFilterButtons();
+  setupFilterSheet();
+  setPanelState("collapsed");
+
+  map.on("zoomend", toggleWaypointFacilities);
+
   await loadPark();
   await loadLake();
   await loadRiver();
   await loadHabitats();
   await loadTrails();
   await loadFacilities();
-  await populateSpeciesFilter();
+  await populateSpeciesOptions();
   await loadSightings();
-  setupLocateButton();
-  setupSightingUI();
-  setupDrawer();
-  setupSplashScreen();
-  setupInfoPanel();
-  setPanelState("collapsed");
-  map.on("zoomend", toggleWaypointFacilities);
 }
 
 init();
