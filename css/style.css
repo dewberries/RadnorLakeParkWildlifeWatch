@@ -754,4 +754,23 @@ input[type="text"] {
   .leaflet-top.leaflet-left {
     top: 18px;
   }
+  @media (max-width: 600px) {
+    .splash-card {
+      border-radius: 18px;
+      padding: 18px 16px;
+    }
+  
+    .splash-header h1 {
+      font-size: 24px;
+    }
+  
+    .splash-section h2 {
+      font-size: 15px;
+    }
+  
+    .splash-section p {
+      font-size: 13px;
+      line-height: 1.5;
+    }
+  }
 }
